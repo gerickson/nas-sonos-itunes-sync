@@ -158,10 +158,12 @@ fi
 STEM="${1}"
 REMOTE="${2}"
 REMOTEMOUNT="${3}"
-ITUNESDIR="iTunes"
-LOCALITUNESPATH="${STEM}/Music/${ITUNESDIR}"
 MUSICDIR="Music"
-LOCALMUSICPATH="${STEM}/Music/${MUSICDIR}"
+ITUNESAPPDIR="iTunes"
+LOCALITUNESAPPPATH="${STEM}/${MUSICDIR}/${ITUNESAPPDIR}"
+MUSICAPPDIR="Music"
+LOCALMUSICAPPPATH="${STEM}/${MUSICDIR}/${MUSICAPPDIR}"
+XMLLIBRARYFILE="iTunes Library.xml"
 
 shift 3
 
@@ -187,32 +189,32 @@ if [ ! -d "${REMOTEMOUNT}" ]; then
     exit 1
 fi
 
-# As appropriate, run an rsync archive operation of: 1) "iTunes
-# Music", "iTunes Library.itl", and "iTunes Music Library.xml" from
-# the local source, excluding "TV Shows" and any ".DS_Store" files and
-# deleting items in the destination not present in the source, to the
-# remote on the local mount point. 2) "Music Library.musiclibrary" and
-# "Media" (including a potentially localized version thereof) from the
-# local source, excluding any ".DS_Store" files and deleting items in
-# the destination not present in the source, to the remote on the local
+# As appropriate, run a: 1) rsync archive operation of "iTunes Music" and
+# "iTunes Library.itl" from the local source, excluding "TV Shows" and any
+# ".DS_Store" files and deleting items in the destination not present in the
+# source, to the remote on the local mount point. 2) rsync archive operation
+# of "Music Library.musiclibrary" and "Media" (including a potentially
+# localized version thereof) from the local source, excluding any ".DS_Store"
+# files and deleting items in the destination not present in the source, to
+# the remote on the local mount point. 3) rsync archive operation of or
+# AppleScript generation of "iTunes Library.xml" to the remote on the local
 # mount point.
 
-if [ ! -d "${LOCALITUNESPATH}" ] && [ ! -d "${LOCALMUSICPATH}" ]; then
-    log_error "cannot find the local iTunes path, "\""${LOCALITUNESPATH}"\"" or local Music path, "\""${LOCALMUSICPATH}"\""."
+if [ ! -d "${LOCALITUNESAPPPATH}" ] && [ ! -d "${LOCALMUSICAPPPATH}" ]; then
+    log_error "cannot find the local iTunes path, "\""${LOCALITUNESAPPPATH}"\"" or local Music path, "\""${LOCALMUSICAPPPATH}"\""."
 
     exit 1
 fi
 
 # 1) Synchronize iTunes.app content, if present
 
-if [ "${LOCALITUNESPATH}" ]; then
-    log_info "Attempting to synchronize "\""${LOCALITUNESPATH}"\""..."
+if [ -d "${LOCALITUNESAPPPATH}" ]; then
+    log_info "Attempting to synchronize "\""${LOCALITUNESAPPPATH}"\""..."
 
-    do_rsync "${LOCALITUNESPATH}/iTunes Library.itl"        "${REMOTEMOUNT}/${ITUNESDIR}/" --exclude='TV Shows'
-    do_rsync "${LOCALITUNESPATH}/iTunes Library.xml"        "${REMOTEMOUNT}/${ITUNESDIR}/" --exclude='TV Shows'
-    do_rsync "${LOCALITUNESPATH}/iTunes Music"              "${REMOTEMOUNT}/${ITUNESDIR}/" --exclude='TV Shows'
+    do_rsync "${LOCALITUNESAPPPATH}/iTunes Library.itl"        "${REMOTEMOUNT}/${ITUNESAPPDIR}/" --exclude='TV Shows'
+    do_rsync "${LOCALITUNESAPPPATH}/iTunes Music"              "${REMOTEMOUNT}/${ITUNESAPPDIR}/" --exclude='TV Shows'
 
-    log_info "successfully synchronized "\""${LOCALITUNESPATH}"\""."
+    log_info "successfully synchronized "\""${LOCALITUNESAPPPATH}"\""."
 fi
 
 # 2) Synchronize Music.app content, if present
@@ -221,12 +223,50 @@ fi
 # migration from a prior iTunes.app initialization, some directories
 # or files may or may not be present.
 
-if [ -d "${LOCALMUSICPATH}" ]; then
-    log_info "Attempting to synchronize "\""${LOCALMUSICPATH}"\""..."
+if [ -d "${LOCALMUSICAPPPATH}" ]; then
+    log_info "Attempting to synchronize "\""${LOCALMUSICAPPPATH}"\""..."
 
-    do_rsync "${LOCALMUSICPATH}/Media"                      "${REMOTEMOUNT}/${MUSICDIR}/"
-    do_rsync "${LOCALMUSICPATH}/Media.localized"            "${REMOTEMOUNT}/${MUSICDIR}/"
-    do_rsync "${LOCALMUSICPATH}/Music Library.musiclibrary" "${REMOTEMOUNT}/${MUSICDIR}/"
+    do_rsync "${LOCALMUSICAPPPATH}/Media"                      "${REMOTEMOUNT}/${MUSICAPPDIR}/"
+    do_rsync "${LOCALMUSICAPPPATH}/Media.localized"            "${REMOTEMOUNT}/${MUSICAPPDIR}/"
+    do_rsync "${LOCALMUSICAPPPATH}/Music Library.musiclibrary" "${REMOTEMOUNT}/${MUSICAPPDIR}/"
 
-    log_info "successfully synchronized "\""${LOCALMUSICPATH}"\""."
+    log_info "successfully synchronized "\""${LOCALMUSICAPPPATH}"\""."
+fi
+
+# 3) One of the most important thing to the Sonos experience, particularly for
+# large, playlist-heavy libraries, is the "iTunes Library.xml" XML version of
+# the music library, which contains all of those potential playlists and the
+# tracks that populate them. When this file exists, either locally or on a
+# remote NAS volume, Sonos can process it and auto-populate those playlists
+# without the effort of manually exporting each and every playlist as a .m3u
+# or .m3u8 export.
+#
+# The iTunes app used to automatically export "iTunes Library.xml" on every
+# run of the iTunes app. However, with the transition from the iTunes app to
+# the Music app, this is no longer the case. Consequently, the "iTunes
+# Library.xml" (which is the exact name expected by Sonos) must be
+# manually-generated. This can either be done from the Music app user
+# interface (UI) via File > Library > Export Library... or, as here, via an
+# undocumented AppleScript event.
+#
+# If there is a local iTunes app path and an "iTunes Library.xml" BUT NOT a
+# Music app path, then we prefer to rsync that file to the NAS volume since
+# this would tend to indicate a legacy iTunes app installation. However, if
+# there is a Music app path, then presumably the user has upgraded and we then
+# generate the "iTunes Library.xml" file from AppleScript on the fly.
+
+if [ -d "${LOCALMUSICAPPPATH}" ]; then
+    log_info "Attempting to generate "\""${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"\""..."
+    
+    if [ -n "${DRYRUN}" ]; then
+        ${DRYRUN} osascript -e 'tell application "Music" to «event hookExpt» source 1' ">|" "${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"
+    else
+        osascript -e 'tell application "Music" to «event hookExpt» source 1' >| "${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"
+    fi
+
+    log_info "successfully generated "\""${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"\""."
+elif [ -d "${LOCALITUNESAPPPATH}" ]; then
+    log_info "Attempting to synchronize "\""${LOCALITUNESAPPPATH}/${XMLLIBRARYFILE}"\""..."
+
+    do_rsync "${LOCALITUNESAPPPATH}/${XMLLIBRARYFILE}"         "${REMOTEMOUNT}/${ITUNESAPPDIR}/" --exclude='TV Shows'
 fi
