@@ -1,7 +1,7 @@
 #!/bin/sh
 
 #
-#    Copyright (c) 2019-2021 Grant Erickson
+#    Copyright (c) 2019-2022 Grant Erickson
 #    All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,7 +50,7 @@ usage() {
 
 version() {
     echo "`basename ${0}` @PACKAGE_VERSION@"
-    echo "Copyright (c) 2019-2021 Grant Erickson. All rights reserved."
+    echo "Copyright (c) 2019-2022 Grant Erickson. All rights reserved."
     
     exit 0
 }
@@ -240,7 +240,7 @@ if [ -d "${LOCALMUSICAPPPATH}" ]; then
     log_info "successfully synchronized "\""${LOCALMUSICAPPPATH}"\""."
 fi
 
-# 3) One of the most important thing to the Sonos experience, particularly for
+# 3) One of the most important things to the Sonos experience, particularly for
 # large, playlist-heavy libraries, is the "iTunes Library.xml" XML version of
 # the music library, which contains all of those potential playlists and the
 # tracks that populate them. When this file exists, either locally or on a
@@ -264,11 +264,28 @@ fi
 
 if [ -d "${LOCALMUSICAPPPATH}" ]; then
     log_info "Attempting to generate "\""${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"\""..."
-    
+
     if [ -n "${DRYRUN}" ]; then
         ${DRYRUN} osascript -e 'tell application "Music" to «event hookExpt» source 1' ">|" "${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"
     else
-        osascript -e 'tell application "Music" to «event hookExpt» source 1' >| "${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"
+        music_was_running=$(osascript -e 'if application "Music" is running then'  \
+                -e 'return true'                                                   \
+            -e 'else'                                                              \
+                -e 'return false'                                                  \
+            -e 'end if')
+
+		osascript -e 'tell application "Music" to «event hookExpt» source 1'       \
+			>| "${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"
+
+        music_is_running=$(osascript -e 'if application "Music" is running then'   \
+                -e 'return true'                                                   \
+            -e 'else'                                                              \
+                -e 'return false'                                                  \
+            -e 'end if')
+
+		if [ "${music_was_running}" = "false" ] && [ "${music_is_running}" = "true" ]; then
+		    osascript -e 'tell application "Music" to quit'
+		fi
     fi
 
     log_info "successfully generated "\""${REMOTEMOUNT}/${MUSICAPPDIR}/${XMLLIBRARYFILE}"\""."
